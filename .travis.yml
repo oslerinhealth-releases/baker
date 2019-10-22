@@ -1,12 +1,10 @@
-# Sample .travis.yml for R projects
-
 language: r
 cache: packages
 warnings_are_errors: true
-sudo: required
-osx_image: xcode9
+use_bioc: true
+bioc_required: true
 cran: http://cran.rstudio.com
-
+dist: trusty
 addons:
   apt:
     packages:
@@ -14,44 +12,78 @@ addons:
     - libgsl0-dev
     - libgsl0ldbl
     - jags
-
-
-before_install:
-  - fname=travis_helpers.sh
-  - wget -O ${fname} http://bit.ly/travis_helpers
-  - cat ${fname}; source ${fname}; rm ${fname}  
-  - cat DESCRIPTION
-  - jags_install
-  - export PROJ_DIR=`basename ${TRAVIS_BUILD_DIR}`
-  - export PACKAGE_NAME=`package_name`
-
-script:
-  - echo "Overriding travis R script"
-
-jobs:
-  include:
-    - script:
-      - cd ..
-      - travis_wait 1000 R CMD build ${PROJ_DIR} ${R_BUILD_ARGS}
-      - PKG_FILE_NAME=$(ls -1t *.tar.gz | head -n 1)
-      - travis_wait 1000 R CMD check ${R_CHECK_ARGS} "${PKG_FILE_NAME}";
-      os: linux
-    - script:
-      - cd ..
-      - travis_wait 1000 R CMD build ${PROJ_DIR} ${R_BUILD_ARGS}
-      - PKG_FILE_NAME=$(ls -1t *.tar.gz | head -n 1)
-      - travis_wait 1000 R CMD check ${R_CHECK_ARGS} "${PKG_FILE_NAME}";
-      os: osx
-  
+os:
+- linux
+- osx
+osx_image: xcode9.4
+services:
+- xvfb
+r:
+- 3.3
+- 3.4
+- 3.5
+- release
+- devel
+matrix:
+  allow_failures:
+  - r: devel
 env:
- global:
-  - NOT_CRAN=TRUE
+  global:
   - RGL_USE_NULL=TRUE
-  - R_BUILD_ARGS=" --no-manual"
-  - R_CHECK_ARGS=" --timings --as-cran --no-manual"
+  - PROJECT_NAME=oslerinhealth-releases
+  - DISPLAY=:99.0
+r_check_args: "--as-cran --install-args=--build"
+before_install:
+- ulimit -n 2048
+- export PROJ_DIR=`basename $PWD`
+- fname=travis_helpers.sh
+- wget -O ${fname} http://bit.ly/travis_helpers
+- cat ${fname}; source ${fname}; rm ${fname}
+- cat DESCRIPTION
+- codename=`linux_codename`;
+- if [ "${codename}" = "trusty" ]; then start_xvfb ; fi
+- export rver=`r_version`; echo $rver ;
+- if [ "$TRAVIS_OS_NAME" = "osx" ]; then no_open_mp ; fi
+- jags_install || true;
+- v8_install || true;
+- dcmtk_install || true;
+- gsl_install 2.1 || true ;
+- remove_neuroc_packages
+- cat DESCRIPTION
+- install_remotes_no_dep
+- cat DESCRIPTION
+- export PACKAGE_NAME=`package_name`
+- echo "Package Name is $PACKAGE_NAME"
+- install_python_requirements ;
+after_success:
+- cat ${PACKAGE_NAME}.Rcheck/00install.out
+- cat ${PACKAGE_NAME}.Rcheck/00check.log
+after_failure:
+- cat ${PACKAGE_NAME}.Rcheck/00install.out
+- cat ${PACKAGE_NAME}.Rcheck/00check.log
+before_deploy:
+- if [ "$TRAVIS_OS_NAME" = "osx" ]; then PKG_TARBALL=$(ls -1t *.tgz | head -n 1);
+  PKG_TARBALL_WITH_R=`echo $PKG_TARBALL | sed 's/.tgz/_'"R${rver}"'.tgz/'` ; mv ${PKG_TARBALL}
+  ${PKG_TARBALL_WITH_R} ; echo "Built tarball is ${PKG_TARBALL_WITH_R}" ; fi
+- if [ "$TRAVIS_OS_NAME" = "linux" ]; then PKG_TARBALL=$(ls -1t *.tar.gz | head -n
+  1); PKG_TARBALL_WITH_R=`echo $PKG_TARBALL | sed 's/.tar.gz/_'"R${rver}"'.tar.gz/'`
+  ; mv ${PKG_TARBALL} ${PKG_TARBALL_WITH_R} ; echo "Built tarball is ${PKG_TARBALL_WITH_R}"
+  ; fi
+- if [[ "${TRAVIS_OS_NAME}" = "osx" ]]; then rm -f *.tar.gz; fi
+deploy:
+  provider: releases
+  skip_cleanup: true
+  file_glob: true
+  file: "${PACKAGE_NAME}*.t*gz"
+  on:
+    tags: true
+  api-key:
+    secure: y4IMDO+0EmlG2uJoRQoxJgsBy7xOMAa8ytWZnGw/uRVHDtq1iySFej8VkLiDDmMNaruJ1uI8tDmTOrMnSsS5Tmd2eROQQQlFQYbnRgseXovKO1mUDws2ZaYZ3BMN8xezGG6wf1IaecPAT0SIEDVS1nu8rbd5nDr6Qbd86k70d3NzyxiC4HH4v/K+48irADr7GbCkr4ooCQLNhtNV+lL+CQjpRUofSA3jl4+Kd+q9MX75jvw44VlCeDwzp0F2K8E6LF0WoQ7fszP0np29YzcEBHgQQeKqQLt3G6cIXtCaVsjF+XqsEmywNYk7ibI45RMaaLhkaMudH2rXlFCX5KtVtpt9hYeCim94ajutDgxSIte7RbjKydnSGLVkfeRVchFv2Tw4PHG0+dSHiDEr+KNUnXBtbOdJnZQAqxxLAia/VZGKVjatwxTQ+H//Cx5R1yR8exiJ6qtHfbjT+3ULw0I8ibuXJVqXp9GrAqtPHmOqAr84Of9pOoIqg1iCNYJwUsgSTbHZP+4I+cq6aCqGArhe65SnPvTdEIIzAJGeq43SF9gGIzcQJPMTizJ8H5r95yhUF6swpJ8va0e90HFemFpdYMQlG7peRItr+2kOowaUe1ix6CBacYgSJ/WDP1q1x+XmMIDWydtXfQobXa/l1GJ+dHrbA3PMnxijSzmxNlXId5w=
+after_deploy:
+- echo "${PROJECT_NAME}" | grep -q "releases"; if [[ $? -eq 0 ]]; then run_coverage="false";
+  else run_coverage=; fi;
+- if [[ "${TRAVIS_OS_NAME}" == "linux" && ${TRAVIS_R_VERSION_STRING} = "release" &&
+  -z "${run_coverage}" ]]; then echo 'covr::coveralls(type = "all", quiet = FALSE)'
+  > osler_covr.R ; travis_wait 100 Rscript osler_covr.R ; rm osler_covr.R ; fi
 
-notifications:
-  email:
-    on_success: change
-    on_failure: change
-    
+#neuroc.deps version (SHA): a5aa5ca

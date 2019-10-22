@@ -10,3 +10,6 @@ baker_package_manuscript
 web
 ^cran-comments\.md$
 ^appveyor\.yml$
+^DESCRIPTION\.bak$
+^\./\.travis\.yml\.bak$
+^\./appveyor\.yml\.bak$
